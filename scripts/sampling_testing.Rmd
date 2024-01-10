@@ -1,0 +1,118 @@
+---
+title: "Sampling test"
+author: "Jason Flower"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(terra)
+library(irr) #for Cohen's K statistic
+
+source("../functions/cluster_to_rast.R")
+```
+
+```{r}
+num_cells <- 1e4
+
+num_cols <- sqrt(num_cells)
+
+num_rows <- sqrt(num_cells)
+
+bio_oracle_data <- list.files("../data/bio_oracle/", full.names = TRUE) |>
+    terra::rast()
+
+area_polygon <- mregions2::mrp_get("eez", cql_filter = "territory1 = 'Micronesia'") |>
+  vect()
+
+grid <- area_polygon |>
+  rast(nrow = num_rows, ncol = num_cols, vals = 0)
+```
+
+```{r}
+area_data <- bio_oracle_data |>
+  crop(grid, snap = "out") |>
+  resample(grid, method = "average") 
+
+data_for_clustering_df <- as.data.frame(area_data)
+  
+plot(area_data, fun = function(x)lines(area_polygon))
+```
+
+# Sampling
+
+```{r}
+
+results_df <- data.frame()
+
+max_num_clusters <- 8
+
+sample_sizes <- sort(c(10^(1:4), 5000, 7500))
+
+for (i in sample_sizes){
+  
+  print(i)
+  start_time <- Sys.time()
+  
+  df_sample <- data_for_clustering_df[sample.int(nrow(data_for_clustering_df), i),]
+clust_result <- NbClust::NbClust(data = df_sample, method = "kmeans", max.nc = max_num_clusters,  index = "hartigan")
+
+time_diff <- difftime(Sys.time(), start_time)
+results_df <- rbind(results_df, c(i, as.numeric(clust_result$Best.nc[1]), time_diff, units(time_diff)))
+}
+
+colnames(results_df) <- c("Sample size", "Number of clusters", "Run time", "Run time units")
+
+results_df
+```
+
+# Max number of clusters
+
+```{r}
+results_df <- data.frame()
+
+max_num_clusters <- 4:8
+for (i in max_num_clusters){
+  
+  print(i)
+  start_time <- Sys.time()
+  
+clust_result <- NbClust::NbClust(data = data_for_clustering_df, method = "kmeans", max.nc = i,  index = "hartigan")
+
+time_diff <- difftime(Sys.time(), start_time)
+results_df <- rbind(results_df, c(i, as.numeric(clust_result$Best.nc[1]), time_diff, units(time_diff)))
+}
+
+colnames(results_df) <- c("Max number clusters", "Number of clusters", "Run time", "Run time units")
+
+results_df
+```
+
+
+```{r}
+max_num_clusters <- 10
+
+start_time <- Sys.time()
+clust_result <- NbClust::NbClust(data = data_for_clustering_df, method = "kmeans", max.nc = max_num_clusters,  index = "hartigan")
+
+print(difftime(Sys.time(), start_time))
+
+print(clust_result$Best.nc)
+```
+
+```{r}
+clust_ras <- cluster_to_rast(area_data, clust_result$Best.partition)
+
+plot(clust_ras)
+```
+
+```{r}
+clust_result_kmeans <- kmeans(x = data_for_clustering_df, centers = clust_result$Best.nc[1], nstart = 10)
+
+clust_ras_kmeans <- cluster_to_rast(area_data, clust_result_kmeans$cluster)
+
+plot(clust_ras_kmeans)
+```
+
