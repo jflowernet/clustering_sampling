@@ -9,90 +9,52 @@ output: html_document
 knitr::opts_chunk$set(echo = FALSE)
 
 library(terra)
-library(irr) #for Cohen's K statistic
+library(magrittr)
 
 source("../functions/cluster_to_rast.R")
+source("../functions/optimal_cluster_size_timing.R")
+source("../functions/clustering_data.R")
 ```
 
-```{r}
-num_cells <- 1e4
-
-num_cols <- sqrt(num_cells)
-
-num_rows <- sqrt(num_cells)
-
+```{r data setup include=FALSE}
 bio_oracle_data <- list.files("../data/bio_oracle/", full.names = TRUE) |>
     terra::rast()
 
 area_polygon <- mregions2::mrp_get("eez", cql_filter = "territory1 = 'Micronesia'") |>
   vect()
-
-grid <- area_polygon |>
-  rast(nrow = num_rows, ncol = num_cols, vals = 0)
 ```
 
-```{r}
-area_data <- bio_oracle_data |>
-  crop(grid, snap = "out") |>
-  resample(grid, method = "average") 
+# Sample sizes test
 
-data_for_clustering_df <- as.data.frame(area_data)
-  
-plot(area_data, fun = function(x)lines(area_polygon))
+More than 10000 rows will not be possible due to time and memory consumption: ~20000 cells with max number of clusters = 8 takes >2 mins and suck up more than 8GB of RAM
+
+```{r}
+set.seed(1234)
+
+data_for_clustering_df <- clustering_data(area_polygon = area_polygon, num_cells = 1e4)
+
+sample_sizes <- c(10^(1:4), 5000, 7500)
+
+sample_size_results <- optimal_cluster_size_timing(sample_sizes = sample_sizes, max_num_clusters = 8, data_for_clustering_df = data_for_clustering_df)
+
+knitr::kable(sample_size_results)
 ```
 
-# Sampling
+# Max number of clusters test
 
 ```{r}
-
-results_df <- data.frame()
-
-max_num_clusters <- 8
-
-sample_sizes <- sort(c(10^(1:4), 5000, 7500))
-
-for (i in sample_sizes){
-  
-  print(i)
-  start_time <- Sys.time()
-  
-  df_sample <- data_for_clustering_df[sample.int(nrow(data_for_clustering_df), i),]
-clust_result <- NbClust::NbClust(data = df_sample, method = "kmeans", max.nc = max_num_clusters,  index = "hartigan")
-
-time_diff <- difftime(Sys.time(), start_time)
-results_df <- rbind(results_df, c(i, as.numeric(clust_result$Best.nc[1]), time_diff, units(time_diff)))
-}
-
-colnames(results_df) <- c("Sample size", "Number of clusters", "Run time", "Run time units")
-
-results_df
-```
-
-# Max number of clusters
-
-```{r}
-results_df <- data.frame()
+data_for_clustering_df <- clustering_data(area_polygon = area_polygon, num_cells = 1e4)
 
 max_num_clusters <- 4:8
-for (i in max_num_clusters){
-  
-  print(i)
-  start_time <- Sys.time()
-  
-clust_result <- NbClust::NbClust(data = data_for_clustering_df, method = "kmeans", max.nc = i,  index = "hartigan")
 
-time_diff <- difftime(Sys.time(), start_time)
-results_df <- rbind(results_df, c(i, as.numeric(clust_result$Best.nc[1]), time_diff, units(time_diff)))
-}
+max_clusters_results <- optimal_cluster_size_timing(sample_sizes = NULL, max_num_clusters = max_num_clusters, data_for_clustering_df = data_for_clustering_df)
 
-colnames(results_df) <- c("Max number clusters", "Number of clusters", "Run time", "Run time units")
-
-results_df
+knitr::kable(max_clusters_results)
 ```
 
 
 ```{r}
-max_num_clusters <- 10
+max_num_clusters <- 6
 
 start_time <- Sys.time()
 clust_result <- NbClust::NbClust(data = data_for_clustering_df, method = "kmeans", max.nc = max_num_clusters,  index = "hartigan")
@@ -108,10 +70,17 @@ clust_ras <- cluster_to_rast(area_data, clust_result$Best.partition)
 plot(clust_ras)
 ```
 
+# Clustering with known number of clusters
+
 ```{r}
+start_time <- Sys.time()
 clust_result_kmeans <- kmeans(x = data_for_clustering_df, centers = clust_result$Best.nc[1], nstart = 10)
 
+print("Run time = ", Sys.time()- start_time)
+
 clust_ras_kmeans <- cluster_to_rast(area_data, clust_result_kmeans$cluster)
+
+
 
 plot(clust_ras_kmeans)
 ```
