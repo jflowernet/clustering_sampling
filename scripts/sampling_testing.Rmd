@@ -31,7 +31,7 @@ More than 10000 rows will not be possible due to time and memory consumption: ~2
 ```{r}
 set.seed(1234)
 
-data_for_clustering_df <- clustering_data(area_polygon = area_polygon, num_cells = 1e4)
+data_for_clustering_df <- clustering_data(area_polygon = area_polygon, num_cells = 1e5)
 
 sample_sizes <- c(10^(1:4), 5000, 7500)
 
@@ -52,6 +52,81 @@ max_clusters_results <- optimal_cluster_size_timing(sample_sizes = NULL, max_num
 knitr::kable(max_clusters_results)
 ```
 
+# Multiple samples for consensus
+
+```{r}
+set.seed(1234)
+
+data_for_clustering_df <- clustering_data(area_polygon = area_polygon, num_cells = 1e5)
+
+sample_sizes <- rep(5000, 5)
+
+results_consensus <- optimal_cluster_size_timing(sample_sizes = sample_sizes, max_num_clusters = 6, data_for_clustering_df = data_for_clustering_df)
+
+knitr::kable(results_consensus)
+```
+
+Try with larger dataset
+
+```{r}
+set.seed(1234)
+
+data_for_clustering_df <- clustering_data(area_polygon = area_polygon, num_cells = 1e7)
+
+sample_sizes <- rep(5000, 5)
+
+results_consensus <- optimal_cluster_size_timing(sample_sizes = sample_sizes, max_num_clusters = 6, data_for_clustering_df = data_for_clustering_df)
+
+knitr::kable(results_consensus)
+```
+
+# Parallel
+
+```{r}
+set.seed(1234)
+
+data_for_clustering_df <- clustering_data(area_polygon = area_polygon, num_cells = 1e7)
+
+sample_size <- 5000
+
+num_clustering_runs <- 5
+
+max_num_clusters <- 6
+
+num_cores <- 5
+start_time <- Sys.time()
+
+df_sample <- lapply(rep(5000,5), function(x) data_for_clustering_df[sample.int(nrow(data_for_clustering_df), x),])
+
+best_no_clusts <- sapply(df_sample, function(x) NbClust::NbClust(data = x, method = "kmeans", max.nc = max_num_clusters,  index = "hartigan") %>% .[[2]] %>% .["Number_clusters"])
+
+difftime(Sys.time(), start_time)
+
+#parallel version
+
+start_time <- Sys.time()
+
+df_sample <- lapply(rep(5000,5), function(x) data_for_clustering_df[sample.int(nrow(data_for_clustering_df), x),])
+
+if(Sys.info()["sysname"]=="Windows"){
+  
+  cluster <- parallel::makePSOCKcluster(num_cores)
+  best_no_clusts <- parallel::parLapply(cluster, df_sample, function(x) NbClust::NbClust(data = x, method = "kmeans", max.nc = max_num_clusters,  index = "hartigan") %>% .[[2]] %>% .["Number_clusters"]) %>% 
+    unlist()
+  
+}else{
+  
+best_no_clusts <- parallel::mclapply(df_sample, function(x) NbClust::NbClust(data = x, method = "kmeans", max.nc = max_num_clusters,  index = "hartigan") %>% .[[2]] %>% .["Number_clusters"], mc.cores = num_cores) %>% 
+  unlist()
+}
+
+difftime(Sys.time(), start_time)
+
+uniq_values <- unique(best_no_clusts)
+
+uniq_values[which.max(tabulate(match(best_no_clusts, uniq_values)))]
+
+```
 
 ```{r}
 max_num_clusters <- 6
